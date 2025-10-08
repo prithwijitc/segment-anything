@@ -192,6 +192,7 @@ class Attention(nn.Module):
         qkv_bias: bool = True,
         use_rel_pos: bool = False,
         rel_pos_zero_init: bool = True,
+        last_attn = None,  # <-- add this line
         input_size: Optional[Tuple[int, int]] = None,
     ) -> None:
         """
@@ -234,6 +235,7 @@ class Attention(nn.Module):
             attn = add_decomposed_rel_pos(attn, q, self.rel_pos_h, self.rel_pos_w, (H, W), (H, W))
 
         attn = attn.softmax(dim=-1)
+        self.last_attn = attn.detach().cpu()  # <-- add this line
         x = (attn @ v).view(B, self.num_heads, H, W, -1).permute(0, 2, 3, 1, 4).reshape(B, H, W, -1)
         x = self.proj(x)
 
