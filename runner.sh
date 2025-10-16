@@ -43,12 +43,30 @@
 #     --seeds 4
 
 
-  python gaussian_normality_sam.py \
-    --image /home/prithwijit/Vit/dog_image.jpg \
-    --prompts /home/prithwijit/Vit/dog_0.json \
-    --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
-    --model-type vit_h \
-    --out-dir /home/prithwijit/Vit/attention/segment-anything/gauss_check \
-    --block-idx -1 \
-    --n-proj 256 \
-    --alpha 0.05
+#   python gaussian_normality_sam.py \
+#     --image /home/prithwijit/Vit/dog_image.jpg \
+#     --prompts /home/prithwijit/Vit/dog_0.json \
+#     --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
+#     --model-type vit_h \
+#     --out-dir /home/prithwijit/Vit/attention/segment-anything/gauss_check \
+#     --block-idx -1 \
+#     --n-proj 256 \
+#     --alpha 0.05
+
+
+#   python mi_prompt_curves_plus_gt.py \
+#     --image /home/prithwijit/Vit/dog_image.jpg \
+#     --prompts /home/prithwijit/Vit/dog_0.json \
+#     --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
+#     --model-type vit_h \
+#     --out-dir /home/prithwijit/Vit/attention/segment-anything/mi_prompts_gt1 \
+#     --gt-mask /home/prithwijit/Vit/dog.jpg \
+#     --mine-steps 200 --infonce-steps 200 --seeds 3
+
+python shapley_prompts_separate.py \
+  --image /home/prithwijit/Vit/dog_image.jpg \
+  --prompts /home/prithwijit/Vit/dog_0.json \
+  --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth --model-type vit_h \
+  --gt-mask /home/prithwijit/Vit/dog.jpg --perms 40 --mi-mode avg \
+  --out-dir /home/prithwijit/Vit/attention/segment-anything/shapley_sep
+
