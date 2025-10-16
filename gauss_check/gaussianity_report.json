@@ -1,0 +1,93 @@
+{
+  "config": {
+    "block_idx": 1,
+    "alpha": 0.05,
+    "n_proj": 256,
+    "logit_eps": 0.001,
+    "Hf": 64,
+    "Wf": 64,
+    "N_tokens": 4096,
+    "Cx": 256,
+    "Cz": 256
+  },
+  "univariate": {
+    "X": {
+      "features": 256,
+      "alpha": 0.05,
+      "rejected": 251,
+      "reject_rate": 0.98046875
+    },
+    "Z": {
+      "features": 256,
+      "alpha": 0.05,
+      "rejected": 255,
+      "reject_rate": 0.99609375
+    },
+    "Y_logit": {
+      "features": 1,
+      "alpha": 0.05,
+      "rejected": 1,
+      "reject_rate": 1.0
+    }
+  },
+  "random_projection": {
+    "X": {
+      "n_proj": 256,
+      "alpha": 0.05,
+      "rejected": 252,
+      "reject_rate": 0.984375
+    },
+    "Z": {
+      "n_proj": 256,
+      "alpha": 0.05,
+      "rejected": 253,
+      "reject_rate": 0.98828125
+    },
+    "XZ": {
+      "n_proj": 256,
+      "alpha": 0.05,
+      "rejected": 253,
+      "reject_rate": 0.98828125
+    },
+    "ZY": {
+      "n_proj": 256,
+      "alpha": 0.05,
+      "rejected": 253,
+      "reject_rate": 0.98828125
+    }
+  },
+  "henze_zirkler": {
+    "X": {
+      "available": false,
+      "normal": null,
+      "stat": null,
+      "p": null,
+      "alpha": 0.05,
+      "note": "HZ test failed: multivariate_normality() got an unexpected keyword argument 'method'"
+    },
+    "Z": {
+      "available": false,
+      "normal": null,
+      "stat": null,
+      "p": null,
+      "alpha": 0.05,
+      "note": "HZ test failed: multivariate_normality() got an unexpected keyword argument 'method'"
+    },
+    "XZ": {
+      "available": false,
+      "normal": null,
+      "stat": null,
+      "p": null,
+      "alpha": 0.05,
+      "note": "HZ test failed: multivariate_normality() got an unexpected keyword argument 'method'"
+    },
+    "ZY": {
+      "available": false,
+      "normal": null,
+      "stat": null,
+      "p": null,
+      "alpha": 0.05,
+      "note": "HZ test failed: multivariate_normality() got an unexpected keyword argument 'method'"
+    }
+  }
+}
