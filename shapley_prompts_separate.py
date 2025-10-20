@@ -169,7 +169,9 @@ def infonce_lower_bound(X, Z, steps=120, batch=1024, lr=1e-3, proj=128, temp=0.1
             idx = torch.randint(0, N, (b,), generator=gen, device=device)
             xb, zb = PX[idx], PZ[idx]
             logits = (xb @ zb.t()) / temp
-            ce = nn.CrossEntropyLoss()(logits, targets=torch.arange(b, device=device))
+            # ce = nn.CrossEntropyLoss()(logits, targets=torch.arange(b, device=device))
+            ce = nn.CrossEntropyLoss()(logits, torch.arange(b, device=device, dtype=torch.long))
+
             vals.append(float(-ce.item()))
     return float(np.mean(vals))
 

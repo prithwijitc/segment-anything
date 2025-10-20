@@ -1,0 +1,6 @@
+J1 full MI(Z;Y)           = -3.062466
+E_J1 (min-max over pool)  = 0.556059
+J2 full MI(Z;Y_gt)        = -3.121407
+E_J2 (min-max over pool)  = 0.599668
+J3 full IoU               = 0.993950
+full Dice                 = 0.996966
