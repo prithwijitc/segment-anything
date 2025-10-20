@@ -1,0 +1,25 @@
+{
+  "image": "/home/prithwijit/Vit/attention/segment-anything/image_17.jpg",
+  "prompts": "/home/prithwijit/Vit/attention/segment-anything/outputs_masks/image_17_sampled_prompts.json",
+  "checkpoint": "/home/prithwijit/Vit/sam_vit_h_4b8939.pth",
+  "model_type": "vit_h",
+  "token_grid": [
+    64,
+    64
+  ],
+  "K_star": 6,
+  "anchor_mode": "boundary",
+  "decision_tolerances": {
+    "PredIoU": 0.002,
+    "AnchMI": 0.004,
+    "Stability": 0.005
+  },
+  "redundancy_thresholds": {
+    "eps_pred": 0.005,
+    "eps_mi": 0.01,
+    "eps_stab": 0.01,
+    "eps_dU_local": 0.002,
+    "eps_dMI_local": 0.005,
+    "th_overlap": 0.7
+  }
+}

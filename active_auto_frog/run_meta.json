@@ -1,0 +1,14 @@
+{
+  "image": "/home/prithwijit/Vit/attention/segment-anything/frog_snail_toad.jpg",
+  "prompts": "/home/prithwijit/Vit/attention/segment-anything/outputs_time_series_frog_new/frog_snail_toad_prompts.json",
+  "checkpoint": "/home/prithwijit/Vit/sam_vit_h_4b8939.pth",
+  "model_type": "vit_h",
+  "token_grid": [
+    64,
+    64
+  ],
+  "K_star": 13,
+  "anchor_mode": "boundary",
+  "suggest_from": "knee",
+  "suggest_budget": 8
+}

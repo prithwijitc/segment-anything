@@ -1,32 +1,27 @@
 #!/usr/bin/env python3
 """
-Active prompting (fast): detects knee, flags redundancies, refines prompt set,
-and (optionally) evaluates faithfulness vs GT — with performance upgrades and
-explainability artifacts.
+Active prompting: detect over-prompting, flag redundant prompts, refine prompt set,
+and (optionally) evaluate faithfulness vs GT.
 
-Speedups:
-  - Reuse SAM encodings: build two predictors (orig + hflip) once.
-  - Persistent hooks on Two-Way transformer (no per-step registration).
-  - Train InfoNCE once per step → reuse logits for global & local weighted MI.
-  - AMP for projection heads; chunked projections/matmuls.
+- Decisions use GT-free proxies (PredIoU, Anchored weighted InfoNCE MI, Stability).
+- If GT is given, only used for reporting IoU/Dice (faithfulness).
 
-Explainability (saved under out_dir/explain/):
-  - Ownership map (i2t argmax) overlays with dots and legend (per step).
-  - Sensitivity maps: |prob_k - prob_{k-1}| overlays + CSV with deltas.
-  - Final Prompt→Image attention overlay for the newly added prompt (per step).
-  - Internals dump per step: final_t2i_attn, last_keys, labels, points (.npz).
+Outputs:
+  - curves for PredIoU, Anchored MI, Stability, Uncertainty
+  - metrics_per_step.csv (+ delta & EMA columns)
+  - redundancy_report.csv (per-prompt)
+  - overprompting_knee.json
+  - refined_prompts.json (time-ordered, reindexed)
+  - eval_refinement.csv (IoU/Dice original vs early-stop vs refined if GT provided)
 
-Requires: segment-anything (facebookresearch), numpy, torch, pillow, matplotlib.
+Requires: segment-anything (facebookresearch)
 """
 
-import argparse, json, math, csv, os
+import argparse, json, math, csv
 from pathlib import Path
 import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm
-from matplotlib.colors import Normalize
-from matplotlib.patches import Patch
 
 import torch
 import torch.nn as nn
@@ -71,7 +66,8 @@ def binary_iou_dice(pred01, gt01):
     return float(iou), float(dice)
 
 def ema(arr, alpha=0.4):
-    out = []; m = None
+    out = []
+    m = None
     for v in arr:
         m = v if m is None else alpha*v + (1-alpha)*m
         out.append(m)
@@ -96,6 +92,10 @@ def hflip_mask(prob):
     return np.flip(prob, axis=1).copy()
 
 def make_disk_mask(H, W, x, y, radius):
+    """
+    Returns (ys_slice, xs_slice, disk_bool) for a circular neighborhood centered at (x,y).
+    If the ROI is empty, returns (None, None, None).
+    """
     x = int(round(x)); y = int(round(y))
     if radius <= 0:
         return None, None, None
@@ -105,7 +105,7 @@ def make_disk_mask(H, W, x, y, radius):
         return None, None, None
     xs = np.arange(x0, x1)
     ys = np.arange(y0, y1)
-    xxg, yyg = np.meshgrid(xs, ys)          # (h, w)
+    xxg, yyg = np.meshgrid(xs, ys)          # shapes (h, w)
     disk = (xxg - x) ** 2 + (yyg - y) ** 2 <= (radius * radius)
     if not disk.any():
         return None, None, None
@@ -130,55 +130,47 @@ def uncertainty_weights_from_prob_tok(prob_tok_hw, gamma=1.0):
     return w.view(-1)
 
 
-# ------------- Two-Way hooks (persistent) -------------
-class TwoWayHook:
-    """
-    Persistent hook manager. Captures:
-      - final_t2i_attn: [B,H,Nq,Ni]
-      - last_keys: keys tensor after final block [B,Ni,C]
-      - last_queries: (optional) [B,Nq,C]
-    Clear cache via .clear() before each forward.
-    """
-    def __init__(self, two_way):
-        self.cache = {}
-        self.h = []
-        def _get_qkv(args, kwargs):
-            if kwargs and all(k in kwargs for k in ("q","k","v")):
-                return kwargs["q"], kwargs["k"], kwargs["v"]
-            return args[0], args[1], args[2]
+# ------------- Two-Way hooks -------------
+def attach_two_way_hooks(two_way):
+    cache = {}
+    def _get_qkv(args, kwargs):
+        if kwargs and all(k in kwargs for k in ("q","k","v")):
+            return kwargs["q"], kwargs["k"], kwargs["v"]
+        if len(args) >= 3: return args[0], args[1], args[2]
+        raise RuntimeError("Expected (q,k,v) in final attn hooks")
 
-        def pre_final(m, a, k):
-            q,k,v = _get_qkv(a,k); self.cache["_final"]=(q.detach(),k.detach(),v.detach())
+    def pre_hook_final(module, args, kwargs):
+        q,k,v = _get_qkv(args, kwargs); cache["_final_inputs"]=(q.detach(),k.detach(),v.detach())
 
-        def fwd_final(m, a, k, o):
-            q,k,v = self.cache.get("_final", _get_qkv(a,k))
-            ql, kl = m.q_proj(q), m.k_proj(k)
-            B,Nq,C = ql.shape; H = m.num_heads; Ch = C//H
-            qh = ql.view(B,Nq,H,Ch).permute(0,2,1,3)
-            kh = kl.view(B,-1,H,Ch).permute(0,2,1,3)
-            attn = torch.softmax(torch.matmul(qh, kh.transpose(-1,-2))/ (Ch**0.5), dim=-1)
-            self.cache["final_t2i_attn"] = attn.detach()
+    def fwd_hook_final(module, args, kwargs, output):
+        q,k,v = cache.get("_final_inputs", _get_qkv(args, kwargs))
+        ql = module.q_proj(q); kl = module.k_proj(k)
+        B, Nq, Cq = ql.shape; H = module.num_heads; Ch = Cq // H
+        qh = ql.view(B, Nq, H, Ch).permute(0,2,1,3)  # [B,H,Nq,Ch]
+        kh = kl.view(B, -1, H, Ch).permute(0,2,1,3)  # [B,H,Ni,Ch]
+        attn = torch.matmul(qh, kh.transpose(-1,-2)) / (Ch**0.5)
+        cache["final_t2i_attn"] = torch.softmax(attn, dim=-1).detach()
 
-        def fwd_block(m, a, o):
-            q,k = o
-            self.cache["last_queries"] = q.detach()
-            self.cache["last_keys"]    = k.detach()
+    def fwd_hook_block_out(module, args, out):
+        q,k = out
+        cache["last_queries"] = q.detach()
+        cache["last_keys"]    = k.detach()
 
-        try:
-            self.h.append(two_way.final_attn_token_to_image.register_forward_pre_hook(pre_final, with_kwargs=True))
-            self.h.append(two_way.final_attn_token_to_image.register_forward_hook    (fwd_final, with_kwargs=True))
-        except TypeError:
-            self.h.append(two_way.final_attn_token_to_image.register_forward_pre_hook(lambda m,a: pre_final(m,a,{})))
-            self.h.append(two_way.final_attn_token_to_image.register_forward_hook    (lambda m,a,o: fwd_final(m,a,{},o)))
-        self.h.append(two_way.register_forward_hook(fwd_block))
+    hs=[]
+    try:
+        hs.append(two_way.final_attn_token_to_image.register_forward_pre_hook(pre_hook_final, with_kwargs=True))
+        hs.append(two_way.final_attn_token_to_image.register_forward_hook    (fwd_hook_final, with_kwargs=True))
+    except TypeError:
+        hs.append(two_way.final_attn_token_to_image.register_forward_pre_hook(lambda m,a: pre_hook_final(m,a,{})))
+        hs.append(two_way.final_attn_token_to_image.register_forward_hook    (lambda m,a,o: fwd_hook_final(m,a,{},o)))
+    hs.append(two_way.register_forward_hook(fwd_hook_block_out))
+    return hs, cache
 
-    def clear(self): self.cache.clear()
-    def close(self):
-        for hh in self.h: hh.remove()
-        self.h = []
+def remove_hooks(handles):
+    for h in handles: h.remove()
 
 
-# ------------- Weighted InfoNCE (fit once, reuse logits) -------------
+# ------------- Weighted InfoNCE -------------
 class ProjectionHead(nn.Module):
     def __init__(self, in_dim, proj_dim=128):
         super().__init__()
@@ -188,53 +180,39 @@ class ProjectionHead(nn.Module):
         )
     def forward(self, x): return self.net(x)
 
-@torch.no_grad()
-def weighted_infonce_bound_from_logits(logits, weights):
-    """
-    logits: [N,N] (dot/temperature already applied)
-    weights: [N] (sum=1)
-    Returns the InfoNCE lower bound as weighted negative CE on the diagonal.
-    """
-    targets = torch.arange(logits.shape[0], device=logits.device)
-    ce = F.cross_entropy(logits, targets, reduction='none')  # [N]
-    w = (weights / (weights.sum() + 1e-12)).to(ce.dtype)
-    return float(-(w * ce).sum().item())
-
-def fit_infonce_and_project(Z, Y, steps, batch, lr, proj_dim, temp, device, amp=True):
-    """
-    Train fZ,fY once, return projected embeddings and logits:
-      - PZ, PY: [N, Dp]
-      - logits: [N, N] = (PZ @ PY^T) / temp
-    """
+def infoNCE_weighted_lower_bound(Z, Y, row_weights, steps=200, batch=2048, lr=1e-3, proj=128, temp=0.1, device="cuda"):
     N = Z.shape[0]
+    fZ = ProjectionHead(Z.shape[1], proj_dim=proj).to(device)
+    fY = ProjectionHead(Y.shape[1], proj_dim=proj).to(device)
+    opt = torch.optim.Adam(list(fZ.parameters()) + list(fY.parameters()), lr=lr)
+
     Zn = (Z - Z.mean(0, keepdim=True)) / (Z.std(0, keepdim=True) + 1e-6)
     Yn = (Y - Y.mean(0, keepdim=True)) / (Y.std(0, keepdim=True) + 1e-6)
 
-    fZ = ProjectionHead(Z.shape[1], proj_dim).to(device)
-    fY = ProjectionHead(Y.shape[1], proj_dim).to(device)
-    opt = torch.optim.Adam(list(fZ.parameters())+list(fY.parameters()), lr=lr)
-    scaler = torch.cuda.amp.GradScaler(enabled=amp and (device!='cpu'))
+    rw = row_weights.clamp(min=0)
+    rw = rw / (rw.sum() + 1e-12)
 
     for _ in range(steps):
         b = min(batch, N)
-        idx = torch.randint(0, N, (b,), device=device)
-        with torch.cuda.amp.autocast(enabled=amp and (device!='cpu')):
-            z_b = fZ(Zn[idx]); y_b = fY(Yn[idx])
-            logits = (z_b @ y_b.t()) / temp
-            targets = torch.arange(b, device=device)
-            loss = F.cross_entropy(logits, targets)
-        opt.zero_grad(set_to_none=True)
-        scaler.scale(loss).backward()
-        scaler.step(opt); scaler.update()
+        idx = torch.multinomial(rw, num_samples=b, replacement=True)
+        z_b = fZ(Zn[idx]); y_b = fY(Yn[idx])
+        logits  = (z_b @ y_b.t()) / temp
+        targets = torch.arange(b, device=device)
+        loss_per = F.cross_entropy(logits, targets, reduction='none')
+        rwb = rw[idx]; rwb = rwb / (rwb.sum() + 1e-12)
+        loss = (rwb * loss_per).sum()
+        opt.zero_grad(set_to_none=True); loss.backward(); opt.step()
 
-    with torch.no_grad(), torch.cuda.amp.autocast(enabled=amp and (device!='cpu')):
-        PZ, PY = [], []
-        for i in range(0, N, 4096):
-            j = min(N, i+4096)
-            PZ.append(fZ(Zn[i:j])); PY.append(fY(Yn[i:j]))
-        PZ = torch.cat(PZ, 0); PY = torch.cat(PY, 0)
-        logits = (PZ @ PY.t()) / temp
-    return PZ, PY, logits
+    with torch.no_grad():
+        b = min(4096, N)
+        idx = torch.multinomial(rw, num_samples=b, replacement=True)
+        z_b = fZ(Zn[idx]); y_b = fY(Yn[idx])
+        logits  = (z_b @ y_b.t()) / temp
+        targets = torch.arange(b, device=device)
+        ce = F.cross_entropy(logits, targets, reduction='none')
+        rwb = rw[idx]; rwb = rwb / (rwb.sum() + 1e-12)
+        lb = float(-(rwb * ce).sum().item())
+    return lb
 
 
 # ------------- SAM utilities -------------
@@ -252,118 +230,51 @@ def down_up_to_original(lowres_logits, predictor, device):
     return prob.detach().cpu().numpy()
 
 
-# ------------- Visualization helpers -------------
-def overlay_heatmap(bg_rgb_uint8, heat_01, alpha=0.55, cmap='jet'):
-    Hbg, Wbg = bg_rgb_uint8.shape[:2]
-    if isinstance(heat_01, torch.Tensor):
-        heat_01 = heat_01.detach().cpu().float().numpy()
-    # normalize to [0,1]
-    h = heat_01.astype(np.float32)
-    h -= h.min()
-    h /= (h.max() - h.min() + 1e-8)
-    if h.shape != (Hbg, Wbg):
-        h = up_nearest(h, Hbg, Wbg)
-    base = bg_rgb_uint8.astype(np.float32) / 255.0
-    colored = cm.get_cmap(cmap)(np.clip(h, 0.0, 1.0))[..., :3]
-    out = (1 - alpha) * base + alpha * colored
-    return np.clip(out, 0, 1)
-
-def distinct_prompt_colors(n):
-    if n <= 10:
-        cmap = plt.get_cmap('tab10')
-        return [tuple(cmap(i)[:3]) for i in range(n)]
-    elif n <= 20:
-        cmap = plt.get_cmap('tab20')
-        return [tuple(cmap(i)[:3]) for i in range(n)]
-    else:
-        import colorsys
-        return [colorsys.hsv_to_rgb((i / n) % 1.0, 0.65, 0.95) for i in range(n)]
-
-def save_ownership_overlay(img, argmax_rs, pts_vis, lbl, out_path, alpha=0.55):
-    colors = distinct_prompt_colors(len(pts_vis))
-    overlay = img.astype(np.float32)/255.0
-    H,W = overlay.shape[:2]
-    # paint categorical
-    for i, col in enumerate(colors):
-        mask = (argmax_rs == i).astype(np.float32)[...,None]
-        col_arr = np.array(col, dtype=np.float32)[None,None,:]
-        overlay = (1 - alpha*mask)*overlay + (alpha*mask)*col_arr
-    # scatter dots
-    fig, ax = plt.subplots(1,1, figsize=(12, 12*(H/W)))
-    ax.imshow(overlay)
-    handles=[]
-    for i, (x,y) in enumerate(pts_vis):
-        c = colors[i]
-        ax.scatter([x],[y], c=[c], s=55, marker='o', edgecolor='black', linewidths=0.8)
-        lab = f"P{i+1} ({'+' if lbl[i]==1 else '-'})"
-        handles.append(Patch(facecolor=c, edgecolor='black', label=lab))
-    ax.legend(handles=handles, loc='upper right', fontsize=9, frameon=True, title="Prompts")
-    ax.set_axis_off(); ax.set_title("Image→Prompt ARGMAX (ownership)")
-    fig.tight_layout(); fig.savefig(out_path, dpi=200); plt.close(fig)
-
-def save_t2i_final_for_prompt(img, attn_final, prompt_offset, i, token_hw, out_path, alpha=0.55, cmap='jet'):
+# ------------- Evaluation for a given prompt set -------------
+def evaluate_prompt_set(predictor, sam, img, pts_xy, lbl, w_ref, args, hooks_cache_out=None):
     """
-    attn_final: [B,Hh,Nq,Ni], take mean over heads and prompt i → image tokens.
+    Run SAM on (img, prompts) and compute:
+      - prob (H,W), PredIoU, Stability (hflip), fused Z, pooled Y, final prompt ownership labels on token grid
+      - K_last (for Z), final_t2i_attn
+      - Anchored InfoNCE MI
+    Optionally returns hooks cache for introspection.
     """
-    Hh = attn_final.shape[1]
-    A = attn_final.mean(dim=1)[0]  # [Nq, Ni]
-    tok_idx = prompt_offset + i
-    if tok_idx >= A.shape[0]:
-        return
-    am = A[tok_idx]  # [Ni]
-    Hf,Wf = token_hw
-    heat = am.view(Hf, Wf).detach().cpu().numpy()
-    ov = overlay_heatmap(img, heat, alpha=alpha, cmap=cmap)
-    fig, ax = plt.subplots(1,1, figsize=(8,8*(img.shape[0]/img.shape[1])))
-    ax.imshow(ov); ax.set_axis_off()
-    ax.set_title(f"Final Prompt→Image attention (prompt #{i+1})")
-    fig.tight_layout(); fig.savefig(out_path, dpi=200); plt.close(fig)
-
-
-# ------------- Eval a prompt set (NO set_image; uses prebuilt predictors) -------------
-def evaluate_prompt_set(predictor, predictor_flip, sam, img, pts_xy, lbl, w_anchor, args, hook_mgr=None):
     device = next(sam.parameters()).device
     H, W = img.shape[:2]
-    if hook_mgr is None:
-        hook_mgr = TwoWayHook(sam.mask_decoder.transformer)
-    hook_mgr.clear()
 
-    # Original orientation
+    predictor.set_image(img)
+
+    two_way = sam.mask_decoder.transformer
+    handles, cache = attach_two_way_hooks(two_way)
     with torch.inference_mode():
         masks, scores, logits = predictor.predict(
             point_coords=pts_xy if len(pts_xy) else np.zeros((0,2), np.float32),
             point_labels=lbl      if len(pts_xy) else np.zeros((0,), np.int32),
             multimask_output=False,
         )
+    remove_hooks(handles)
+
     prob = down_up_to_original(logits, predictor, device)
     pred_iou = float(scores[0]) if len(scores)>0 else float('nan')
 
-    # hflip TTA (reuse cached flipped features; mirror coords only)
-    if args.use_tta:
-        pts_flip = hflip_coords_xy(pts_xy.copy(), W) if len(pts_xy) else np.zeros((0,2), np.float32)
-        with torch.inference_mode():
-            _, _, lf = predictor_flip.predict(
-                point_coords=pts_flip,
-                point_labels=lbl if len(pts_xy) else np.zeros((0,), np.int32),
-                multimask_output=False,
-            )
-        prob_f = down_up_to_original(lf, predictor_flip, device)
-        stability = binary_iou_dice((prob>=0.5).astype(np.uint8),
-                                    (hflip_mask(prob_f)>=0.5).astype(np.uint8))[0]
-    else:
-        stability = 1.0  # degenerate "stable" if TTA disabled
+    # Stability via hflip TTA
+    img_flip = np.ascontiguousarray(np.fliplr(img))
+    predictor.set_image(img_flip)
+    pts_flip = hflip_coords_xy(pts_xy.copy(), W) if len(pts_xy) else np.zeros((0,2), np.float32)
+    with torch.inference_mode():
+        mf, sf, lf = predictor.predict(point_coords=pts_flip, point_labels=lbl if len(pts_xy) else np.zeros((0,), np.int32), multimask_output=False)
+    prob_f = down_up_to_original(lf, predictor, device)
+    stability = binary_iou_dice((prob>=0.5).astype(np.uint8), (hflip_mask(prob_f)>=0.5).astype(np.uint8))[0]
+    predictor.set_image(img)  # restore
 
-    # Tokens and internals
+    # Tokens, Z, Y, ownership
     feats = predictor.features
     _, Cfeat, Hf, Wf = feats.shape
     Ni = Hf*Wf
 
-    last_k = hook_mgr.cache.get("last_keys")      # [B,Ni,C]
-    Afin  = hook_mgr.cache.get("final_t2i_attn")  # [B,Hh,Nq,Ni]
+    last_k = cache.get("last_keys"); Afin = cache.get("final_t2i_attn")
     if last_k is None or Afin is None:
-        raise RuntimeError("Two-Way hooks did not capture internals; ensure predictors share the same SAM and hooks installed.")
-
-    # Ownership labels on tokens
+        raise RuntimeError("Failed to capture internals (keys/attn).")
     A = Afin.mean(dim=1)  # [B,Nq,Ni]
     num_mask_tokens = getattr(sam.mask_decoder, "num_mask_tokens", 3)
     prompt_offset = 1 + num_mask_tokens
@@ -380,30 +291,30 @@ def evaluate_prompt_set(predictor, predictor_flip, sam, img, pts_xy, lbl, w_anch
     Z = torch.cat([K_last, A_pr.transpose(0,1)], dim=1).to(device)  # [Ni, Ck+Np]
     Ytok = torch.from_numpy(area_pool_to_tokens(prob, Hf, Wf)).float().to(device)  # [Ni,1]
 
-    # Train InfoNCE ONCE, get logits for global+local weighted bounds
-    PZ, PY, logits = fit_infonce_and_project(
-        Z, Ytok,
+    # Anchored MI
+    mi_val = infoNCE_weighted_lower_bound(
+        Z, Ytok, row_weights=w_ref.to(device),
         steps=args.infonce_steps, batch=args.infonce_batch, lr=args.infonce_lr,
-        proj_dim=args.infonce_proj, temp=args.infonce_temp,
-        device=device, amp=(not args.no_amp)
+        proj=args.infonce_proj, temp=args.infonce_temp, device=device
     )
-    mi_anchor = weighted_infonce_bound_from_logits(logits, w_anchor)
 
+    # Uncertainty metrics
+    uncert_global = float((prob * (1-prob)).mean())
     out = {
         "prob": prob, "pred_iou": pred_iou, "stability": float(stability),
-        "Z": Z.detach(), "Ytok": Ytok.detach(), "token_hw": (Hf, Wf),
-        "A_final": Afin.detach(), "last_keys": last_k.detach(),
-        "labels_tok": labels, "prompt_offset": int(prompt_offset),
-        "logits": logits.detach(),  # reuse for local MI
+        "uncert_global": uncert_global, "uncert_boundary": uncert_global,  # boundary-only requires an anchor map; omitted here
+        "Z": Z.detach(), "Ytok": Ytok.detach(), "labels_tok": labels, "token_hw": (Hf,Wf),
+        "A_final": Afin.detach(), "last_keys": last_k.detach(), "last_queries": cache.get("last_queries", None)
     }
-    return mi_anchor, out
+    if hooks_cache_out is not None:
+        hooks_cache_out.update(out)
+    return mi_val, out
 
 
 # ---------------- Main pipeline ----------------
 def run(args):
     device = "cuda" if torch.cuda.is_available() and not args.cpu else "cpu"
     out_dir = Path(args.out_dir); ensure_dir(out_dir)
-    exp_dir = out_dir / "explain"; ensure_dir(exp_dir)
 
     # ---- Load inputs ----
     img = load_image_rgb(args.image)
@@ -414,7 +325,7 @@ def run(args):
     pts_all = np.array([[p["x"], p["y"]] for p in prom_list], dtype=np.float32)
     lbl_all = np.array([int(p["label"]) for p in prom_list], dtype=np.int32)
 
-    # Clip prompts to bounds
+    # Clip OOB prompts to image bounds (safer than skipping)
     pts_all[:, 0] = np.clip(pts_all[:, 0], 0, W - 1)
     pts_all[:, 1] = np.clip(pts_all[:, 1], 0, H - 1)
 
@@ -422,36 +333,30 @@ def run(args):
     if gt_mask is not None and gt_mask.shape != (H, W):
         raise ValueError("GT mask must match image size")
 
-    # ---- Build SAM and predictors (orig + hflip once) ----
+    # ---- Build SAM ----
     sam = sam_model_registry[args.model_type](checkpoint=args.checkpoint)
     sam.to(device).eval()
-
     predictor = SamPredictor(sam)
-    predictor.set_image(img)  # cache orig features
-
-    predictor_flip = SamPredictor(sam)
-    predictor_flip.set_image(np.ascontiguousarray(np.fliplr(img)))  # cache flipped
-
-    # Persistent hook manager
-    hook_mgr = TwoWayHook(sam.mask_decoder.transformer)
-
-    # ---- Token grid size ----
+    predictor.set_image(img)
     if predictor.features is None:
         raise RuntimeError("Predictor has no encoder features; set_image failed?")
+
     _, Cfeat, Hf, Wf = predictor.features.shape
     Ni = Hf * Wf
 
-    # ---- Anchors (fixed weights) ----
+    # ---- Anchor weights (fixed) ----
     if gt_mask is not None:
         gt_tok = area_pool_to_tokens(gt_mask.astype(np.float32), Hf, Wf).reshape(Hf, Wf)
         w_ref = boundary_ring_weights_from_binary((gt_tok >= 0.5).astype(np.float32), radius=args.ring_radius)
         anchor_note = "GT boundary ring"
     else:
-        # step-0 anchor from no-prompts mask
-        mi0, out0 = evaluate_prompt_set(predictor, predictor_flip, sam, img,
-                                        np.zeros((0,2), np.float32), np.zeros((0,), np.int32),
-                                        w_anchor=torch.ones((Ni,), dtype=torch.float32),
-                                        args=args, hook_mgr=hook_mgr)
+        # Step-0 prediction as anchor
+        hooks_tmp = {}
+        _mi0, out0 = evaluate_prompt_set(predictor, sam, img,
+                                         np.zeros((0, 2), np.float32),
+                                         np.zeros((0,), np.int32),
+                                         w_ref=torch.ones((Ni,), dtype=torch.float32),
+                                         args=args, hooks_cache_out=hooks_tmp)
         prob0 = out0["prob"]
         prob0_tok = area_pool_to_tokens(prob0, Hf, Wf).reshape(Hf, Wf)
         if args.anchor_mode == "boundary":
@@ -462,44 +367,49 @@ def run(args):
             anchor_note = "Step-0 uncertainty"
     w_ref = w_ref.to(device)
 
-    # ---- Loop over prompts ----
+    # ---- Step-by-step metrics ----
     steps = []
     pred_iou, anch_mi, stab = [], [], []
+    unc_g, unc_b = [], []
     iou_gt, dice_gt = [], []
-    probs_per_step = []
-    logits_per_step = []  # for ΔMI local without re-train
-    owner_per_step  = []
-    prompt_records  = []
 
-    # For explainability visuals: model-space prompt coords
-    target = predictor.transform.target_length
-    # transform coords once (original space → model space)
-    pts_model = SamPredictor(sam).transform.apply_coords(pts_all.copy(), (H, W))  # use a fresh transform
+    probs_per_step = []
+    ZY_per_step = []
+    owner_per_step = []
+    prompt_records = []
+
+    token_hw = (Hf, Wf)
 
     for k in range(1, len(pts_all) + 1):
         steps.append(k)
         pts_k = pts_all[:k]; lbl_k = lbl_all[:k]
 
-        mi_k, out = evaluate_prompt_set(predictor, predictor_flip, sam, img,
-                                        pts_k, lbl_k, w_ref, args, hook_mgr=hook_mgr)
+        mi_k, out = evaluate_prompt_set(predictor, sam, img, pts_k, lbl_k, w_ref, args)
         anch_mi.append(mi_k)
         pred_iou.append(out["pred_iou"])
         stab.append(out["stability"])
+        # Uncertainty (global); boundary variant omitted (set equal)
+        uncert = out["uncert_global"]
+        unc_g.append(uncert); unc_b.append(uncert)
 
         probs_per_step.append(out["prob"])
-        logits_per_step.append(out["logits"])
+        ZY_per_step.append((out["Z"], out["Ytok"]))
         owner_per_step.append(out["labels_tok"])
 
         if gt_mask is not None:
             iou, dice = binary_iou_dice((out["prob"] >= 0.5).astype(np.uint8), gt_mask)
             iou_gt.append(iou); dice_gt.append(dice)
 
-        # ---- Per-prompt local stats (new prompt only) ----
+        # Per-prompt local stats at insertion
         x, y, lab = int(pts_k[-1, 0]), int(pts_k[-1, 1]), int(lbl_k[-1])
-        ys, xs, disk = make_disk_mask(H, W, x, y, args.local_radius)
+        rad_px = args.local_radius
+
+        ys, xs, disk = make_disk_mask(H, W, x, y, rad_px)
         if ys is None:
             dU_loc = 0.0
+            dMI_loc = 0.0
         else:
+            # Local uncertainty delta
             if k > 1:
                 prev_prob = probs_per_step[-2][ys, xs]
             else:
@@ -507,28 +417,39 @@ def run(args):
             now_prob = probs_per_step[-1][ys, xs]
             u_prev = (prev_prob[disk] * (1 - prev_prob[disk])).mean()
             u_now  = (now_prob[disk]  * (1 - now_prob[disk])).mean()
-            dU_loc = float(u_prev - u_now)   # bigger is better (uncertainty drops)
+            dU_loc = float(u_prev - u_now)   # want positive
 
-        # Local ΔMI using cached logits (no retraining)
-        token_hw = out["token_hw"]
-        ti = int(round(y * (token_hw[0] / H)))
-        tj = int(round(x * (token_hw[1] / W)))
-        Rtok = max(1, args.token_radius)
-        i0, i1 = max(0, ti - Rtok), min(token_hw[0], ti + Rtok + 1)
-        j0, j1 = max(0, tj - Rtok), min(token_hw[1], tj + Rtok + 1)
-        token_mask = np.zeros(token_hw, dtype=np.uint8); token_mask[i0:i1, j0:j1] = 1
-        w_loc = torch.from_numpy(token_mask.reshape(-1).astype(np.float32)).to(device)
-        if w_loc.sum() == 0:
-            w_loc = torch.ones((token_hw[0]*token_hw[1],), dtype=torch.float32, device=device)
+            # Local MI delta in token neighborhood
+            ti = int(round(y * (token_hw[0] / H)))
+            tj = int(round(x * (token_hw[1] / W)))
+            Rtok = max(1, args.token_radius)
+            i0, i1 = max(0, ti - Rtok), min(token_hw[0], ti + Rtok + 1)
+            j0, j1 = max(0, tj - Rtok), min(token_hw[1], tj + Rtok + 1)
+            token_mask = np.zeros(token_hw, dtype=np.uint8)
+            token_mask[i0:i1, j0:j1] = 1
+            w_loc = torch.from_numpy(token_mask.reshape(-1).astype(np.float32)).to(device)
+            if w_loc.sum() == 0:
+                w_loc = torch.ones((token_hw[0] * token_hw[1],), dtype=torch.float32, device=device)
 
-        if k > 1:
-            mi_prev_local = weighted_infonce_bound_from_logits(logits_per_step[-2], w_loc)
-        else:
-            mi_prev_local = weighted_infonce_bound_from_logits(logits_per_step[-1], w_loc)
-        mi_now_local  = weighted_infonce_bound_from_logits(logits_per_step[-1], w_loc)
-        dMI_loc = float(mi_now_local - mi_prev_local)
+            Z_prev, Y_prev = ZY_per_step[-2] if k > 1 else ZY_per_step[-1]
+            Z_now,  Y_now  = ZY_per_step[-1]
+            mi_prev = infoNCE_weighted_lower_bound(Z_prev, Y_prev, w_loc,
+                                                   steps=args.infonce_local_steps,
+                                                   batch=min(args.infonce_batch, 1024),
+                                                   lr=args.infonce_lr,
+                                                   proj=args.infonce_proj,
+                                                   temp=args.infonce_temp,
+                                                   device=device)
+            mi_now  = infoNCE_weighted_lower_bound(Z_now,  Y_now,  w_loc,
+                                                   steps=args.infonce_local_steps,
+                                                   batch=min(args.infonce_batch, 1024),
+                                                   lr=args.infonce_lr,
+                                                   proj=args.infonce_proj,
+                                                   temp=args.infonce_temp,
+                                                   device=device)
+            dMI_loc = float(mi_now - mi_prev)  # want positive
 
-        # Ownership overlap with union of previous prompts (token grid)
+        # Ownership overlap with union of previous prompts (at token grid)
         if k > 1 and owner_per_step[-1].max() >= 0 and owner_per_step[-2].max() >= 0:
             curr_id = k - 1
             lab_tok  = owner_per_step[-1].copy()
@@ -546,46 +467,8 @@ def run(args):
             "dU_local": dU_loc, "dMI_local": dMI_loc, "overlap_iou": overlap_iou
         })
 
-        # ---- Explainability artifacts per step ----
-        if args.save_explain:
-            # 1) Ownership map overlay
-            argmax_feat = owner_per_step[-1].reshape(token_hw)
-            argmax_rs = up_nearest(argmax_feat, H, W).astype(np.int64)
-            save_ownership_overlay(img, argmax_rs, pts_all[:k], lbl_all[:k],
-                                   exp_dir / f"step_{k:02d}_ownership.png", alpha=args.overlay_alpha)
-
-            # 2) Sensitivity map |prob_k - prob_{k-1}|
-            if k > 1:
-                sens = np.abs(probs_per_step[-1] - probs_per_step[-2])
-                ov_sens = overlay_heatmap(img, sens, alpha=args.overlay_alpha, cmap=args.cmap)
-                plt.imsave(exp_dir / f"step_{k:02d}_sensitivity.png", ov_sens)
-
-            # 3) Final t2i attention overlay for NEW prompt
-            save_t2i_final_for_prompt(
-                img,
-                out["A_final"],
-                out["prompt_offset"],
-                i=(k-1),
-                token_hw=token_hw,
-                out_path=exp_dir / f"step_{k:02d}_t2i_prompt_{k:02d}.png",
-                alpha=args.overlay_alpha,
-                cmap=args.cmap
-            )
-
-            # 4) Internals dump
-            np.savez_compressed(
-                exp_dir / f"step_{k:02d}_internals.npz",
-                final_t2i_attn=out["A_final"].cpu().numpy(),
-                last_keys=out["last_keys"].cpu().numpy(),
-                labels_tok=owner_per_step[-1],
-                points=pts_all[:k],
-                labels=lbl_all[:k],
-                prompt_offset=out["prompt_offset"],
-                token_hw=np.array(token_hw, dtype=np.int32)
-            )
-
         # Step log
-        msg = f"[step {k}] PredIoU={pred_iou[-1]:.3f} AnchMI={anch_mi[-1]:.3f} stab={stab[-1]:.3f}"
+        msg = f"[step {k}] PredIoU={pred_iou[-1]:.3f} AnchMI={anch_mi[-1]:.3f} stab={stab[-1]:.3f} U={unc_g[-1]:.3f}"
         if gt_mask is not None:
             msg += f" | IoU={iou_gt[-1]:.3f} Dice={dice_gt[-1]:.3f}"
         print(msg)
@@ -593,7 +476,8 @@ def run(args):
     # ---- Deltas & knee detection ----
     def deltas(v):
         v = np.asarray(v, dtype=np.float32)
-        d = np.diff(v, prepend=v[:1]); d[0] = np.nan
+        d = np.diff(v, prepend=v[:1])
+        d[0] = np.nan
         return v, d
 
     pred_iou_arr, d_pred = deltas(pred_iou)
@@ -622,12 +506,12 @@ def run(args):
             "K_star": int(K_star),
             "eps_pred": args.eps_pred, "eps_mi": args.eps_mi, "eps_stab": args.eps_stab,
             "knee_m": args.knee_m, "ema_alpha": args.ema_alpha,
-            "anchor_note": anchor_note
+            "anchor_note": "boundary" if args.anchor_mode=="boundary" else "uncertainty"
         }, f, indent=2)
     print(f"[KNEE] Over-prompting knee K* = {K_star}")
 
-    # ---- Redundancy flags ----
-    for idx, rec in enumerate(prompt_records):
+    # ---- Redundancy flags (per-prompt) ----
+    for rec in prompt_records:
         k = rec["step"]
         rec["dPred_global"] = float(d_pred[k-1]) if k>1 else float('nan')
         rec["dMI_global"]   = float(d_mi[k-1])   if k>1 else float('nan')
@@ -639,6 +523,7 @@ def run(args):
         big_overlap  = (rec["overlap_iou"] >= args.th_overlap)
         rec["redundant"] = bool(small_global and small_local and big_overlap)
 
+    # Write redundancy report
     header = ["step","x","y","label","dPred_global","dMI_global","dStab_global","dU_local","dMI_local","overlap_iou","redundant"]
     rows = []
     for r in prompt_records:
@@ -647,7 +532,7 @@ def run(args):
                     f"{r['dU_local']:.6f}", f"{r['dMI_local']:.6f}", f"{r['overlap_iou']:.6f}", int(r["redundant"])])
     save_csv(rows, header, out_dir / "redundancy_report.csv")
 
-    # ---- Curves & per-step CSV ----
+    # ---- Save curves & per-step CSV ----
     def plot_curve(ys, title, ylabel, fname, extra=None):
         fig, ax = plt.subplots(1,1,figsize=(7,4))
         ax.plot(steps, ys, marker='o', label=ylabel)
@@ -655,47 +540,48 @@ def run(args):
             for (lab, arr, style) in extra:
                 ax.plot(steps, arr, style, label=lab)
         ax.set_xlabel("# prompts"); ax.set_ylabel(ylabel); ax.set_title(title); ax.grid(True, alpha=0.3); ax.legend()
-        fig.tight_layout(); fig.savefig(out_dir / fname, dpi=200); plt.close(fig)
+        fig.tight_layout(); fig.savefig(out_dir / fname, dpi=220); plt.close(fig)
 
     plot_curve(pred_iou, "PredIoU vs prompts", "PredIoU", "curve_pred_iou.png")
-    plot_curve(anch_mi,  f"Anchored weighted InfoNCE ({anchor_note})", "I(Z;Y)", "curve_anchored_mi.png")
+    plot_curve(anch_mi,  f"Anchored weighted InfoNCE ({'boundary' if args.anchor_mode=='boundary' else 'uncertainty'} anchor)", "I(Z;Y)", "curve_anchored_mi.png")
     plot_curve(stab,     "Stability (hflip TTA) vs prompts", "IoU(mask, hflip(mask))", "curve_stability.png")
+    plot_curve(unc_g,    "Uncertainty vs prompts", "mean p(1-p)", "curve_uncertainty.png",
+               extra=[("Boundary band (approx)", unc_b, "--")])
     if gt_mask is not None:
         plot_curve(iou_gt, "GT IoU vs prompts", "IoU", "curve_gt_iou.png",
                    extra=[("Dice", dice_gt, "--")])
 
-    # per-step CSV
+    # per-step CSV with deltas & EMA
     rows = []
-    header = ["step","pred_iou","anch_mi","stab"]
+    header = ["step","pred_iou","anch_mi","stab","unc_global","unc_boundary"]
     if gt_mask is not None: header += ["iou_gt","dice_gt"]
     for i,k in enumerate(steps):
-        rr = [k, pred_iou[i], anch_mi[i], stab[i]]
+        rr = [k, pred_iou[i], anch_mi[i], stab[i], unc_g[i], unc_b[i]]
         if gt_mask is not None: rr += [iou_gt[i], dice_gt[i]]
         rows.append(rr)
     header += ["d_pred","d_mi","d_stab","d_pred_ema","d_mi_ema","d_stab_ema"]
-    d_pred_s = ema(np.nan_to_num(np.diff([0]+pred_iou).tolist(), nan=0.0), alpha=args.ema_alpha)  # recompute for same length
-    d_mi_s   = ema(np.nan_to_num(np.diff([0]+anch_mi ).tolist(), nan=0.0), alpha=args.ema_alpha)
-    d_stab_s = ema(np.nan_to_num(np.diff([0]+stab    ).tolist(), nan=0.0), alpha=args.ema_alpha)
     for i,r in enumerate(rows):
         r += [float(d_pred[i] if not math.isnan(d_pred[i]) else 0.0),
               float(d_mi[i]   if not math.isnan(d_mi[i])   else 0.0),
               float(d_stab[i] if not math.isnan(d_stab[i]) else 0.0),
-              float(d_pred_s[i+1] if i+1 < len(d_pred_s) else d_pred_s[-1]),
-              float(d_mi_s[i+1]   if i+1 < len(d_mi_s)   else d_mi_s[-1]),
-              float(d_stab_s[i+1] if i+1 < len(d_stab_s) else d_stab_s[-1])]
+              float(d_pred_s[i]), float(d_mi_s[i]), float(d_stab_s[i])]
     save_csv(rows, header, out_dir / "metrics_per_step.csv")
 
-    # ---- Refinement: early stop + prune redundant with guards ----
-    keep_idx = [i for i in range(K_star)]
+    # ---- Refinement: early stop + prune redundant prompts with guards ----
+    keep_idx = [i for i in range(K_star)]  # keep 0..K*-1 initially
+
+    # Evaluate baseline at early stop
     base_pts = pts_all[:K_star]; base_lbl = lbl_all[:K_star]
-    base_mi, base_out = evaluate_prompt_set(predictor, predictor_flip, sam, img, base_pts, base_lbl, w_ref, args, hook_mgr=hook_mgr)
+    base_mi, base_out = evaluate_prompt_set(predictor, sam, img, base_pts, base_lbl, w_ref, args)
     base_pred, base_stab = base_out["pred_iou"], base_out["stability"]
     if gt_mask is not None:
         base_iou, base_dice = binary_iou_dice((base_out["prob"]>=0.5).astype(np.uint8), gt_mask)
     else:
         base_iou = base_dice = float('nan')
 
+    # Candidates to remove: marked redundant within 1..K*
     candidates = [r for r in prompt_records if (r["step"]<=K_star and r["redundant"])]
+    # remove the worst first: small local MI, small U drop, big overlap
     candidates.sort(key=lambda r: (r["dMI_local"], r["dU_local"], -r["overlap_iou"]))
 
     keep_set = set(keep_idx)
@@ -703,7 +589,8 @@ def run(args):
         pos = r["step"] - 1
         trial = sorted(list(keep_set - {pos}))
         pts_trial = pts_all[trial]; lbl_trial = lbl_all[trial]
-        mi_t, out_t = evaluate_prompt_set(predictor, predictor_flip, sam, img, pts_trial, lbl_trial, w_ref, args, hook_mgr=hook_mgr)
+        mi_t, out_t = evaluate_prompt_set(predictor, sam, img, pts_trial, lbl_trial, w_ref, args)
+        # Guard tolerances
         if (out_t["pred_iou"] + 1e-6) >= (base_pred - args.tol_pred) and \
            (mi_t              + 1e-6) >= (base_mi   - args.tol_mi)   and \
            (out_t["stability"]+ 1e-6) >= (base_stab - args.tol_stab):
@@ -721,14 +608,17 @@ def run(args):
 
     # ---- Faithfulness eval (optional) ----
     if gt_mask is not None:
-        mi_full, out_full = evaluate_prompt_set(predictor, predictor_flip, sam, img, pts_all, lbl_all, w_ref, args, hook_mgr=hook_mgr)
+        # Full original
+        mi_full, out_full = evaluate_prompt_set(predictor, sam, img, pts_all, lbl_all, w_ref, args)
         iou_full, dice_full = binary_iou_dice((out_full["prob"]>=0.5).astype(np.uint8), gt_mask)
 
+        # Early-stop baseline
         iou_base, dice_base = base_iou, base_dice
 
+        # Refined
         pts_ref = np.array([[p["x"],p["y"]] for p in refined_prompts], dtype=np.float32)
         lbl_ref = np.array([int(p["label"]) for p in refined_prompts], dtype=np.int32)
-        mi_ref, out_ref = evaluate_prompt_set(predictor, predictor_flip, sam, img, pts_ref, lbl_ref, w_ref, args, hook_mgr=hook_mgr)
+        mi_ref, out_ref = evaluate_prompt_set(predictor, sam, img, pts_ref, lbl_ref, w_ref, args)
         iou_ref, dice_ref = binary_iou_dice((out_ref["prob"]>=0.5).astype(np.uint8), gt_mask)
 
         rows = [
@@ -747,8 +637,8 @@ def run(args):
         "checkpoint": args.checkpoint,
         "model_type": args.model_type,
         "token_grid": [int(Hf), int(Wf)],
-        "anchor_mode": anchor_note,
         "K_star": int(K_star),
+        "anchor_mode": args.anchor_mode,
         "decision_tolerances": {"PredIoU": args.tol_pred, "AnchMI": args.tol_mi, "Stability": args.tol_stab},
         "redundancy_thresholds": {
             "eps_pred": args.eps_pred, "eps_mi": args.eps_mi, "eps_stab": args.eps_stab,
@@ -756,13 +646,16 @@ def run(args):
         }
     }
     with open(out_dir / "run_meta.json", "w") as f: json.dump(meta, f, indent=2)
+
     print(f"[OK] Outputs in {out_dir.resolve()}")
-    if args.save_explain:
-        print(f"  - Explainability artifacts in {exp_dir.resolve()}")
+    print("  - metrics_per_step.csv (with deltas & EMA), curves, redundancy_report.csv")
+    print("  - overprompting_knee.json, refined_prompts.json")
+    if gt_mask is not None:
+        print("  - eval_refinement.csv (IoU/Dice for original vs early-stop vs refined)")
 
 
 def parse_args():
-    ap = argparse.ArgumentParser("Active prompting (fast): knee, redundancy, refinement + explainability")
+    ap = argparse.ArgumentParser("Active prompting: detect knee, prune redundancy, refine prompts")
     ap.add_argument("--image", required=True)
     ap.add_argument("--prompts", required=True, help="JSON with time-ordered prompts [{t,x,y,label}]")
     ap.add_argument("--checkpoint", required=True)
@@ -777,11 +670,11 @@ def parse_args():
     ap.add_argument("--ring-radius", type=int, default=2)
     ap.add_argument("--unc-gamma",   type=float, default=1.0)
     ap.add_argument("--infonce-steps", type=int, default=200)
+    ap.add_argument("--infonce-local-steps", type=int, default=80)
     ap.add_argument("--infonce-batch", type=int, default=2048)
     ap.add_argument("--infonce-lr",    type=float, default=1e-3)
     ap.add_argument("--infonce-proj",  type=int, default=128)
     ap.add_argument("--infonce-temp",  type=float, default=0.1)
-    ap.add_argument("--no-amp", action="store_true", help="Disable AMP for projection heads")
 
     # Knee detection
     ap.add_argument("--ema-alpha", type=float, default=0.4)
@@ -797,16 +690,10 @@ def parse_args():
     ap.add_argument("--eps-dMI-local", type=float, default=0.005)
     ap.add_argument("--th-overlap", type=float, default=0.7)
 
-    # Refinement guards
+    # Refinement guards (do not accept removal if proxies drop by more than these)
     ap.add_argument("--tol-pred", type=float, default=0.002)
     ap.add_argument("--tol-mi",   type=float, default=0.004)
     ap.add_argument("--tol-stab", type=float, default=0.005)
-
-    # Explainability & viz
-    ap.add_argument("--save-explain", action="store_true", help="Save ownership, sensitivity, t2i overlays, npz internals per step")
-    ap.add_argument("--overlay-alpha", type=float, default=0.55)
-    ap.add_argument("--cmap", default="jet")
-    ap.add_argument("--use-tta", action="store_true", help="Enable hflip TTA for stability score (slower by 1 extra decoder pass)")
 
     ap.add_argument("--cpu", action="store_true")
     return ap.parse_args()

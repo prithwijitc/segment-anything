@@ -1,0 +1,9 @@
+{
+  "K_star": 13,
+  "eps_pred": 0.005,
+  "eps_mi": 0.01,
+  "eps_stab": 0.01,
+  "knee_m": 2,
+  "ema_alpha": 0.4,
+  "anchor_note": "boundary"
+}
