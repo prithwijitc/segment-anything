@@ -75,7 +75,7 @@
 #   --image /home/prithwijit/Vit/attention/segment-anything/frog_snail_toad.jpg \
 #   --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
 #   --model-type vit_h \
-#   --out-dir ./outputs_time_series_frog_new
+#   --out-dir ./outputs_time_series_frog_new1
 
 
 # python active_prompt_refine.py \
@@ -87,23 +87,23 @@
 #   --gt-format png_nonzero_is_fg \
 #   --out-dir /home/prithwijit/Vit/attention/segment-anything//active_refine_run_bird
 
-python sam_from_prompts_once.py \
-  --image /home/prithwijit/Vit/attention/segment-anything/frog_snail_toad.jpg \
-  --prompts /home/prithwijit/Vit/attention/segment-anything/active_auto_frog/refined_prompts.json \
-  --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
-  --model-type vit_h \
-  --multimask \
-  --gt-mask /home/prithwijit/Vit/attention/segment-anything/outputs_time_series_frog/frog_snail_toad_gt.npy \
-  --out-dir /home/prithwijit/Vit/attention/segment-anything/sam_verify_frog1
+# python sam_from_prompts_once.py \
+#   --image /home/prithwijit/Vit/attention/segment-anything/frog_snail_toad.jpg \
+#   --prompts /home/prithwijit/Vit/attention/segment-anything/active_auto_frog/refined_prompts.json \
+#   --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
+#   --model-type vit_h \
+#   --multimask \
+#   --gt-mask /home/prithwijit/Vit/attention/segment-anything/outputs_time_series_frog/frog_snail_toad_gt.npy \
+#   --out-dir /home/prithwijit/Vit/attention/segment-anything/sam_verify_frog1
 
 
 # python sample_prompts_from_mask_new.py \
-#   --image /home/prithwijit/Vit/attention/segment-anything/image_17.jpg \
-#   --mask /home/prithwijit/Vit/attention/segment-anything/shapley_sep/17_0_mask.png \
+#   --image /home/prithwijit/Vit/attention/segment-anything/frog_snail_toad.jpg \
+#   --mask /home/prithwijit/Vit/attention/segment-anything/outputs_time_series_frog/frog_snail_toad_gt.npy \
 #   --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
 #   --model-type vit_h \
-#   --num-pairs 50 \
-#   --out-dir ./outputs_masks
+#   --num-pairs 30 \
+#   --out-dir ./outputs_masks_frog
 
 # python auto_prompt_suggester.py \
 #   --image /home/prithwijit/Vit/attention/segment-anything/frog_snail_toad.jpg \
@@ -116,11 +116,19 @@ python sam_from_prompts_once.py \
 
 # python auto_prompt_suggester.py \
 #   --image /home/prithwijit/Vit/attention/segment-anything/frog_snail_toad.jpg \
-#   --prompts /home/prithwijit/Vit/attention/segment-anything/outputs_time_series_frog_new/frog_snail_toad_prompts.json \
+#   --prompts /home/prithwijit/Vit/attention/segment-anything/outputs_time_series_frog_new1/frog_snail_toad_prompts.json \
 #   --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
 #   --model-type vit_h \
 #   --gt-mask /home/prithwijit/Vit/attention/segment-anything/outputs_time_series_frog/frog_snail_toad_gt.npy \
 #   --gt-format npy_one_is_fg \
-#   --out-dir /home/prithwijit/Vit/attention/segment-anything/active_auto_frog \
+#   --out-dir /home/prithwijit/Vit/attention/segment-anything/active_auto_frog1 \
 #   --use-tta \
 #   --save-explain
+
+
+python interactive_sam_suggestor.py \
+  --image /home/prithwijit/Vit/attention/segment-anything/frog_snail_toad.jpg \
+  --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
+  --model-type vit_h \
+  --out-dir /home/prithwijit/Vit/attention/segment-anything/interactive_demo
+
