@@ -80,7 +80,7 @@ def main():
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda:1" if torch.cuda.is_available() else "cpu"
 
     # Load SAM
     print(f"[INFO] Loading SAM '{args.model_type}' from: {args.checkpoint}")

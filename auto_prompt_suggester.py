@@ -261,22 +261,22 @@ def evaluate_prompt_set(predictor, sam, img, pts_xy, lbl, w_ref, args, hooks_cac
     two_way = sam.mask_decoder.transformer
     handles, cache = attach_two_way_hooks(two_way)
     with torch.inference_mode():
-        # masks, scores, logits = predictor.predict(
-        #     point_coords=pts_xy if len(pts_xy) else np.zeros((0,2), np.float32),
-        #     point_labels=lbl      if len(pts_xy) else np.zeros((0,), np.int32),
-        #     multimask_output=False,
-        # )
-        from hard_prompt import HardPromptEnforcer, HardPromptConfig
-        # (initialize once near the top of your script)
-        enforcer = HardPromptEnforcer(HardPromptConfig(
-            r_pos_px=12, r_neg_px=12,
-            ownership_margin=0.05, ownership_min_conf=0.10,
-            conflict_policy="pos_wins",  # or "neg_wins"
-        ))
-        # ...
-        masks, scores, logits, extras = enforcer.strict_predict(
-            predictor, sam, img, pts_xy if len(pts_xy) else np.zeros((0,2), np.float32), lbl if len(pts_xy) else np.zeros((0,), np.int32), multimask_output=False
+        masks, scores, logits = predictor.predict(
+            point_coords=pts_xy if len(pts_xy) else np.zeros((0,2), np.float32),
+            point_labels=lbl      if len(pts_xy) else np.zeros((0,), np.int32),
+            multimask_output=False,
         )
+        # from hard_prompt import HardPromptEnforcer, HardPromptConfig
+        # # (initialize once near the top of your script)
+        # enforcer = HardPromptEnforcer(HardPromptConfig(
+        #     r_pos_px=12, r_neg_px=12,
+        #     ownership_margin=0.05, ownership_min_conf=0.10,
+        #     conflict_policy="pos_wins",  # or "neg_wins"
+        # ))
+        # # ...
+        # masks, scores, logits, extras = enforcer.strict_predict(
+        #     predictor, sam, img, pts_xy if len(pts_xy) else np.zeros((0,2), np.float32), lbl if len(pts_xy) else np.zeros((0,), np.int32), multimask_output=False
+        # )
 
     remove_hooks(handles)
 
@@ -473,22 +473,22 @@ def evaluate_state_for_suggest(predictor, predictor_flip, sam, img, pts_xy, lbl,
 
     predictor.set_image(img)
     with torch.inference_mode():
-        # masks, scores, logits = predictor.predict(
-        #     point_coords=pts_xy if len(pts_xy) else np.zeros((0,2), np.float32),
-        #     point_labels=lbl      if len(pts_xy) else np.zeros((0,), np.int32),
-        #     multimask_output=False,
-        # )
-        from hard_prompt import HardPromptEnforcer, HardPromptConfig
-        # (initialize once near the top of your script)
-        enforcer = HardPromptEnforcer(HardPromptConfig(
-            r_pos_px=12, r_neg_px=12,
-            ownership_margin=0.05, ownership_min_conf=0.10,
-            conflict_policy="pos_wins",  # or "neg_wins"
-        ))
-        # ...
-        masks, scores, logits, extras = enforcer.strict_predict(
-            predictor, sam, img, pts_xy if len(pts_xy) else np.zeros((0,2), np.float32), lbl if len(pts_xy) else np.zeros((0,), np.int32), multimask_output=False
+        masks, scores, logits = predictor.predict(
+            point_coords=pts_xy if len(pts_xy) else np.zeros((0,2), np.float32),
+            point_labels=lbl      if len(pts_xy) else np.zeros((0,), np.int32),
+            multimask_output=False,
         )
+        # from hard_prompt import HardPromptEnforcer, HardPromptConfig
+        # # (initialize once near the top of your script)
+        # enforcer = HardPromptEnforcer(HardPromptConfig(
+        #     r_pos_px=12, r_neg_px=12,
+        #     ownership_margin=0.05, ownership_min_conf=0.10,
+        #     conflict_policy="pos_wins",  # or "neg_wins"
+        # ))
+        # # ...
+        # masks, scores, logits, extras = enforcer.strict_predict(
+        #     predictor, sam, img, pts_xy if len(pts_xy) else np.zeros((0,2), np.float32), lbl if len(pts_xy) else np.zeros((0,), np.int32), multimask_output=False
+        # )
 
     prob = down_up_to_original(logits, predictor, device)
     pred_iou = float(scores[0]) if len(scores)>0 else float('nan')

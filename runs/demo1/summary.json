@@ -1,0 +1,8 @@
+{
+  "note": "All tensors aligned to exact (H,W). Probabilities/logits saved per iteration. MI-proxy = -CE (higher means more MI). IoU may fluctuate due to thresholding.",
+  "csv": "log.csv",
+  "plot_subplots": "curves_subplots.png",
+  "overlays_dir": "overlays/",
+  "npy_dir": "npy/",
+  "iterations": 100
+}

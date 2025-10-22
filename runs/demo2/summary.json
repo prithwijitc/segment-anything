@@ -1,0 +1,7 @@
+{
+  "note": "Cumulative MI is sum_t [ CE(P_t) - E_C CE(P_t + C) ]. Expectation over C is approximated via Monte Carlo with M=samples-per-iter. Optionally applies scalar temperature scaling to logits to reduce model mismatch.",
+  "csv": "log_robust.csv",
+  "plot_subplots": "curves_robust_subplots.png",
+  "overlays_dir": "overlays/",
+  "npy_dir": "npy/"
+}

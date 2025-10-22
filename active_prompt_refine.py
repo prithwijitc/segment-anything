@@ -313,7 +313,7 @@ def evaluate_prompt_set(predictor, sam, img, pts_xy, lbl, w_ref, args, hooks_cac
 
 # ---------------- Main pipeline ----------------
 def run(args):
-    device = "cuda" if torch.cuda.is_available() and not args.cpu else "cpu"
+    device = "cuda:1" if torch.cuda.is_available() and not args.cpu else "cpu"
     out_dir = Path(args.out_dir); ensure_dir(out_dir)
 
     # ---- Load inputs ----

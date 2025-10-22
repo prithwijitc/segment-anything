@@ -75,7 +75,7 @@
 #   --image /home/prithwijit/Vit/attention/segment-anything/frog_snail_toad.jpg \
 #   --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
 #   --model-type vit_h \
-#   --out-dir ./outputs_time_series_frog_new1
+#   --out-dir ./outputs_time_series_frog_new2
 
 
 # python active_prompt_refine.py \
@@ -83,18 +83,16 @@
 #   --prompts /home/prithwijit/Vit/attention/segment-anything/outputs_masks/image_17_sampled_prompts.json \
 #   --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
 #   --model-type vit_h \
-#   --gt-mask /home/prithwijit/Vit/attention/segment-anything/shapley_sep/17_0_mask.png \
-#   --gt-format png_nonzero_is_fg \
-#   --out-dir /home/prithwijit/Vit/attention/segment-anything//active_refine_run_bird
+#   --out-dir /home/prithwijit/Vit/attention/segment-anything/active_refine_run_bird_with_gt
 
 # python sam_from_prompts_once.py \
-#   --image /home/prithwijit/Vit/attention/segment-anything/frog_snail_toad.jpg \
-#   --prompts /home/prithwijit/Vit/attention/segment-anything/active_auto_frog/refined_prompts.json \
+#   --image /home/prithwijit/Vit/attention/segment-anything/image_17.jpg \
+#   --prompts /home/prithwijit/Vit/attention/segment-anything/outputs_masks/image_17_sampled_prompts.json \
 #   --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
 #   --model-type vit_h \
 #   --multimask \
 #   --gt-mask /home/prithwijit/Vit/attention/segment-anything/outputs_time_series_frog/frog_snail_toad_gt.npy \
-#   --out-dir /home/prithwijit/Vit/attention/segment-anything/sam_verify_frog1
+#   --out-dir /home/prithwijit/Vit/attention/segment-anything/sam_verify_bird1
 
 
 # python sample_prompts_from_mask_new.py \
@@ -119,16 +117,47 @@
 #   --prompts /home/prithwijit/Vit/attention/segment-anything/outputs_time_series_frog_new1/frog_snail_toad_prompts.json \
 #   --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
 #   --model-type vit_h \
-#   --gt-mask /home/prithwijit/Vit/attention/segment-anything/outputs_time_series_frog/frog_snail_toad_gt.npy \
-#   --gt-format npy_one_is_fg \
-#   --out-dir /home/prithwijit/Vit/attention/segment-anything/active_auto_frog1 \
+#   --out-dir /home/prithwijit/Vit/attention/segment-anything/active_auto_frog2 \
 #   --use-tta \
 #   --save-explain
 
+# python auto_prompt_suggester.py \
+#   --image /home/prithwijit/Vit/attention/segment-anything/image_17.jpg \
+#   --prompts /home/prithwijit/Vit/attention/segment-anything/outputs_masks/image_17_sampled_prompts.json \
+#   --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
+#   --model-type vit_h \
+#   --out-dir /home/prithwijit/Vit/attention/segment-anything/active_auto_bird1 \
+#   --use-tta \
+#   --save-explain
 
-python interactive_sam_suggestor.py \
-  --image /home/prithwijit/Vit/attention/segment-anything/frog_snail_toad.jpg \
-  --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
-  --model-type vit_h \
-  --out-dir /home/prithwijit/Vit/attention/segment-anything/interactive_demo
+# python interactive_sam_suggestor.py \
+#   --image /home/prithwijit/Vit/attention/segment-anything/frog_snail_toad.jpg \
+#   --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
+#   --model-type vit_h \
+#   --out-dir /home/prithwijit/Vit/attention/segment-anything/interactive_demo
 
+# MPLBACKEND=Qt5Agg python interactive_active_prompting.py \
+#   --image /home/prithwijit/Vit/attention/segment-anything/frog_snail_toad.jpg \
+#   --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
+#   --model-type vit_h \
+#   --out-dir /home/prithwijit/Vit/attention/segment-anything/out_interactive \
+#   --use-tta
+
+
+  # python prompt_mi_curve.py \
+  #   --image /home/prithwijit/Vit/attention/segment-anything/image_17.jpg \
+  #   --gt /home/prithwijit/Vit/attention/segment-anything/shapley_sep/17_0_mask.png \
+  #   --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
+  #   --model-type vit_h \
+  #   --iterations 100 \
+  #   --out-dir /home/prithwijit/Vit/attention/segment-anything/runs/demo1
+
+
+    python prompt_mi_cmi_curve.py \
+    --image /home/prithwijit/Vit/attention/segment-anything/image_17.jpg \
+    --gt /home/prithwijit/Vit/attention/segment-anything/shapley_sep/17_0_mask.png \
+    --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
+    --model-type vit_h \
+    --iterations 100 \
+    --samples-per-iter 16 \
+    --out-dir /home/prithwijit/Vit/attention/segment-anything/runs/demo2 \
