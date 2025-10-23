@@ -153,11 +153,88 @@
   #   --out-dir /home/prithwijit/Vit/attention/segment-anything/runs/demo1
 
 
-    python prompt_mi_cmi_curve.py \
-    --image /home/prithwijit/Vit/attention/segment-anything/image_17.jpg \
-    --gt /home/prithwijit/Vit/attention/segment-anything/shapley_sep/17_0_mask.png \
-    --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
-    --model-type vit_h \
-    --iterations 100 \
-    --samples-per-iter 16 \
-    --out-dir /home/prithwijit/Vit/attention/segment-anything/runs/demo2 \
+    # python prompt_mi_cmi_curve.py \
+    # --image /home/prithwijit/Vit/attention/segment-anything/image_17.jpg \
+    # --gt /home/prithwijit/Vit/attention/segment-anything/shapley_sep/17_0_mask.png \
+    # --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
+    # --model-type vit_h \
+    # --iterations 100 \
+    # --samples-per-iter 16 \
+    # --out-dir /home/prithwijit/Vit/attention/segment-anything/runs/demo2 \
+
+
+
+    #   python make_prompts_strict.py \
+    # --image /home/prithwijit/Vit/attention/segment-anything/image_17.jpg \
+    # --gt /home/prithwijit/Vit/attention/segment-anything/shapley_sep/17_0_mask.png \
+    # --pairs 20 \
+    # --num-files 220 \
+    # --calib-count 200 \
+    # --out-dir /home/prithwijit/Vit/attention/segment-anything/out_prompts_strict_bird \
+    # --seed 0
+
+  # python robust_calibrate_T.py \
+  # --image /home/prithwijit/Vit/attention/segment-anything/image_17.jpg \
+  # --gt /home/prithwijit/Vit/attention/segment-anything/shapley_sep/17_0_mask.png \
+  # --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
+  # --model-type vit_h \
+  # --calib-dir /home/prithwijit/Vit/attention/segment-anything/out_prompts_strict_bird/calib \
+  # --eval-dir  /home/prithwijit/Vit/attention/segment-anything/out_prompts_strict_bird/eval \
+  # --multimask \
+  # --T-lo 0.3 --T-hi 3.0 --grid 61 --rounds 3 \
+  # --out-dir /home/prithwijit/Vit/attention/segment-anything/runs/calib_one_robust \
+  # --seed 0
+
+# python mc_sufficiency_refine.py \
+#   --image /home/prithwijit/Vit/attention/segment-anything/image_17.jpg \
+#   --gt /home/prithwijit/Vit/attention/segment-anything/shapley_sep/17_0_mask.png \
+#   --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
+#   --model-type vit_h \
+#   --eval-dir /home/prithwijit/Vit/attention/segment-anything/out_prompts_strict_bird/eval \
+#   --calib-json /home/prithwijit/Vit/attention/segment-anything/runs/calib_one_robust/calibration.json \
+#   --multimask \
+#   --mc-samples 64 \
+#   --jitter-radius 2 \
+#   --ce-eps 1e-4 \
+#   --ce-tol 1e-4 \
+#   --miou-tol 0.0 \
+#   --out-dir /home/prithwijit/Vit/attention/segment-anything/runs/mc_sufficiency_one \
+#   --seed 0
+
+
+# python mc_sufficiency_base_eval.py \
+#   --image /home/prithwijit/Vit/attention/segment-anything/image_17.jpg \
+#   --gt /home/prithwijit/Vit/attention/segment-anything/shapley_sep/17_0_mask.png \
+#   --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
+#   --model-type vit_h \
+#   --eval-dir /home/prithwijit/Vit/attention/segment-anything/out_prompts_strict_bird/eval \
+#   --calib-json /home/prithwijit/Vit/attention/segment-anything/runs/calib_one_robust/calibration.json \
+#   --multimask \
+#   --mc-samples 64 \
+#   --jitter-radius 2 \
+#   --ce-eps 1e-4 \
+#   --ce-tol 1e-4 \
+#   --miou-tol 0.0 \
+#   --out-dir /home/prithwijit/Vit/attention/segment-anything/runs/mc_sufficiency_base_eval \
+#   --seed 0
+
+python gtfree_minmax_refiner.py \
+  --image /home/prithwijit/Vit/attention/segment-anything/image_17.jpg \
+  --prompts /home/prithwijit/Vit/attention/segment-anything/outputs_masks/image_17_sampled_prompts.json \
+  --checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
+  --model-type vit_h \
+  --out-dir /home/prithwijit/Vit/attention/segment-anything/runs/minmax \
+  --multimask \
+  --tta \
+  --mc-samples 48 \
+  --env-samples 96 \
+  --jitter-radius 2 \
+  --trim-frac 0.1 \
+  --eps-mode full \
+  --eps-scale 1.00 \
+  --plateau 1e-4 \
+  --seed 0 \
+  --progress
+
+
+

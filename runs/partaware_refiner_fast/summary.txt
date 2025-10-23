@@ -1,0 +1,26 @@
+GT-free, part-aware prompt refiner (hard click constraints + robust min–max) — FAST
+
+Image: /home/prithwijit/Vit/attention/segment-anything/image_17.jpg
+Prompts: /home/prithwijit/Vit/attention/segment-anything/outputs_masks/image_17_sampled_prompts.json
+SAM: vit_h
+
+Click ε (global): 0.003262  (mode=quantile, q=0.5, scale=1.1)
+Global envelope feasible frac: 0.542
+
+FULL (global):
+  C=0.007067  U=0.057572  R=8.753420  E=7.557476
+  U_t=1.000 R_t=1.000 E_t=1.000  F=inf
+
+REFINED (global):
+  N=25  C=0.000030 U=0.026376 R=6.525516 E=7.555603
+  U_t=0.486 R_t=0.850 E_t=0.671  F=0.849709
+
+Files:
+  perfile/refined.json
+  perfile/sufficiency.csv
+  perfile/groups.json
+  perfile/local_regions.npz
+  perfile/energy_breakdown.csv
+  perfile/envelopes_global.json
+  perfile/envelopes_local.json
+  overlays/full_vs_refined_BASE.png

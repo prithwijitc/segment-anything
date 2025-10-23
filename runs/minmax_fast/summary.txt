@@ -1,0 +1,25 @@
+GT-free, theory-first prompt refiner (hard click constraint + min–max energy) — FAST
+
+Image: /home/prithwijit/Vit/attention/segment-anything/image_17.jpg
+Prompts: /home/prithwijit/Vit/attention/segment-anything/outputs_masks/image_17_sampled_prompts.json
+SAM: vit_h
+
+Click ε: 0.009693  (mode=full, scale=1.0)
+Feasible fraction used for envelopes: 1.000
+
+FULL:
+  C=0.007913  U=0.059104  R=8.800259  E=7.557454
+  U_t=1.000 R_t=1.000 E_t=1.000  F=1.000000
+
+REFINED (useful only):
+  N=1  C=0.000001 U=0.029982 R=6.088560 E=7.057112
+  U_t=0.620 R_t=0.000 E_t=0.000  F=0.620264
+
+Files:
+  perfile/sufficiency.csv
+  perfile/refined.json
+  perfile/balanced_minmax.json
+  perfile/energy_breakdown.csv
+  perfile/envelopes.json
+  overlays/full_vs_refined_BASE.png
+  overlays/full_vs_minmax_BASE.png
