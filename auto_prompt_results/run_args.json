@@ -1,0 +1,16 @@
+{
+  "images_root": "/data/prithwijit/vit-attn/pointprompt/Images",
+  "masks_root": "/data/prithwijit/vit-attn/pointprompt/Masks",
+  "out_dir": "/home/prithwijit/Vit/attention/segment-anything/auto_prompt_results",
+  "checkpoint": "/home/prithwijit/Vit/sam_vit_h_4b8939.pth",
+  "model_type": "vit_h",
+  "iterations": 100,
+  "device": "cuda",
+  "seed": 123,
+  "plot_std": false,
+  "normalize_to": "max",
+  "normalization_metric": "miou",
+  "max_datasets": 0,
+  "max_samples_per_dataset": 0,
+  "multimask": true
+}

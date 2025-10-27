@@ -51,10 +51,22 @@
 python auto_prompter_experiment.py \
   --images-root /data/prithwijit/vit-attn/pointprompt/Images \
   --masks-root  /data/prithwijit/vit-attn/pointprompt/Masks \
-  --out-dir     /home/prithwijit/Vit/attention/segment-anything/auto_prompt_results \
+  --out-dir     /home/prithwijit/Vit/attention/segment-anything/auto_prompt_results1 \
   --checkpoint  /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
   --model-type  vit_h \
   --iterations  100 \
   --normalize-to max \
   --normalization-metric miou
 
+
+
+# python dpp_prompt_reduction.py \
+#     --image /home/prithwijit/Vit/attention/segment-anything/image_17.jpg \
+#     --prompts /home/prithwijit/Vit/attention/segment-anything/outputs_masks/image_17_sampled_prompts.json \
+#     --sam_checkpoint /home/prithwijit/Vit/sam_vit_h_4b8939.pth \
+#     --output /home/prithwijit/Vit/attention/segment-anything/dpp_trial_bird/reduced_prompts.json \
+#     --gt_mask /home/prithwijit/Vit/attention/segment-anything/shapley_sep/17_0_mask.png \
+#     --k_safe 15 \
+#     --model_type vit_h \
+#     --seed 42 \
+#     --viz_output /home/prithwijit/Vit/attention/segment-anything/dpp_trial_bird/viz.png             
