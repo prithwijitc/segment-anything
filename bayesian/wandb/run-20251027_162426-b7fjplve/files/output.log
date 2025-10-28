@@ -1,5 +1,0 @@
-TRAIN SET: 3852 images, 23112 examples
-VAL SET: 964 images, 5784 examples
-Bayesian Head: 2,064,897 parameters
-SAM (frozen): 641,090,608 parameters
-Epoch 1:   0%|▎                                                                                                                                         | 55/23112 [04:30<32:13:24,  5.03s/it]
