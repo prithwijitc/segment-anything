@@ -1,0 +1,51 @@
+{
+  "os": "Linux-6.8.0-85-generic-x86_64-with-glibc2.35",
+  "python": "CPython 3.9.23",
+  "startedAt": "2025-10-27T20:20:13.747871Z",
+  "args": [
+    "--config",
+    "config.yaml"
+  ],
+  "program": "/home/prithwijit/Vit/attention/segment-anything/bayesian/train_bayesian_head.py",
+  "codePath": "bayesian/train_bayesian_head.py",
+  "codePathLocal": "train_bayesian_head.py",
+  "git": {
+    "remote": "https://github.com/prithwijitc/segment-anything.git",
+    "commit": "8df53bfa2baea5f8b7edddbf51d3ca56cbf06316"
+  },
+  "email": "pchowdhury6@gatech.edu",
+  "root": "/home/prithwijit/Vit/attention/segment-anything/bayesian",
+  "host": "olives-All-Series",
+  "executable": "/home/prithwijit/miniconda3/envs/vit-attn/bin/python3",
+  "cpu_count": 6,
+  "cpu_count_logical": 12,
+  "gpu": "NVIDIA GeForce RTX 3060",
+  "gpu_count": 2,
+  "disk": {
+    "/": {
+      "total": "982818799616",
+      "used": "931720187904"
+    }
+  },
+  "memory": {
+    "total": "134978981888"
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA GeForce RTX 3060",
+      "memoryTotal": "12884901888",
+      "cudaCores": 3584,
+      "architecture": "Ampere",
+      "uuid": "GPU-b9f95aff-942c-4867-753d-e0fd6e151481"
+    },
+    {
+      "name": "NVIDIA GeForce RTX 3060",
+      "memoryTotal": "12884901888",
+      "cudaCores": 3584,
+      "architecture": "Ampere",
+      "uuid": "GPU-0e07eefb-5889-a340-13f0-99f89ec292f4"
+    }
+  ],
+  "cudaVersion": "12.4",
+  "writerId": "qzfyfrj4uj2jdgikebwjy74l24brycmx"
+}

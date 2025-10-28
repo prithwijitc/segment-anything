@@ -1,0 +1,15 @@
+{"time":"2025-10-27T16:17:50.010416208-04:00","level":"INFO","msg":"stream: starting","core version":"0.22.2"}
+{"time":"2025-10-27T16:17:50.199880694-04:00","level":"INFO","msg":"stream: created new stream","id":"0ctl29q8"}
+{"time":"2025-10-27T16:17:50.199928063-04:00","level":"INFO","msg":"handler: started","stream_id":"0ctl29q8"}
+{"time":"2025-10-27T16:17:50.2000192-04:00","level":"INFO","msg":"stream: started","id":"0ctl29q8"}
+{"time":"2025-10-27T16:17:50.200040313-04:00","level":"INFO","msg":"sender: started","stream_id":"0ctl29q8"}
+{"time":"2025-10-27T16:17:50.200042469-04:00","level":"INFO","msg":"writer: started","stream_id":"0ctl29q8"}
+{"time":"2025-10-27T16:17:50.24342971-04:00","level":"ERROR","msg":"HTTP error","status":404,"method":"POST","url":"https://api.wandb.ai/graphql"}
+{"time":"2025-10-27T16:17:50.243598835-04:00","level":"ERROR","msg":"runupserter: failed to init run","error":"returned error 404: {\"data\":{\"upsertBucket\":null},\"errors\":[{\"message\":\"entity run1 not found during upsertBucket\",\"path\":[\"upsertBucket\"]}]}"}
+{"time":"2025-10-27T16:17:50.264399956-04:00","level":"INFO","msg":"stream: closing","id":"0ctl29q8"}
+{"time":"2025-10-27T16:17:50.265007641-04:00","level":"ERROR","msg":"sender: uploadConfigFile: runupserter: run not yet initialized"}
+{"time":"2025-10-27T16:17:50.315816547-04:00","level":"ERROR","msg":"runfiles: runupserter: run not yet initialized"}
+{"time":"2025-10-27T16:17:50.3168022-04:00","level":"INFO","msg":"fileTransfer: Close: file transfer manager closed"}
+{"time":"2025-10-27T16:17:50.316863846-04:00","level":"INFO","msg":"handler: closed","stream_id":"0ctl29q8"}
+{"time":"2025-10-27T16:17:50.316936355-04:00","level":"INFO","msg":"sender: closed","stream_id":"0ctl29q8"}
+{"time":"2025-10-27T16:17:50.316949089-04:00","level":"INFO","msg":"stream: closed","id":"0ctl29q8"}

@@ -1,0 +1,45 @@
+data:
+  image_dir: /data/prithwijit/vit-attn/pointprompt/Images            # Images/<dataset>/*.jpg
+  mask_dir: /data/prithwijit/vit-attn/pointprompt/Masks              # Masks/<dataset>/*.npy   (binary 0/1 arrays)
+  valid_samples_json: /home/prithwijit/Vit/attention/segment-anything/auto_prompt_results1/single_seed_index.json            # (optional) {"dataset": ["sample_000001", ...]}
+
+training:
+  seed: 42
+  train_split: 0.8
+  num_images: 4000                    # informational only; not used directly
+  num_prompt_policies: 6
+  prompts_per_policy: [1, 15]         # inclusive range
+  noise_rate: 0.10
+  boundary_noise_scale: 2.0
+  batch_size: 2
+  num_epochs: 50
+  learning_rate: 0.0001
+  weight_decay: 0.00001
+  early_stopping_patience: 10
+  head_hidden_dims: [128, 64]
+  head_dropout: 0.10
+  image_size: 512                     # training/val canvas size before SAM upscales to 1024
+  num_workers: 4
+
+sam:
+  model_type: vit_h                   # vit_h | vit_l | vit_b (match your checkpoint)
+  checkpoint: /home/prithwijit/Vit/sam_vit_h_4b8939.pth
+  k_safe: 15
+
+laplace:
+  enable_calibrator: true             # Laplace on 2-parameter logit calibrator
+  method: diagonal                    # kept for completeness (used internally by Laplace)
+  max_calib_batches: 50               # gather this many batches to fit calibrator
+
+validation:
+  calibration_bins: 10
+  ece_target: 0.05
+  nll_target: 0.30
+  brier_target: 0.15
+
+logging:
+  use_wandb: false                    # set true if you want W&B
+  wandb_project: bayesian-sam-head
+  wandb_entity: null
+  log_interval: 10
+  checkpoint_dir: /home/prithwijit/Vit/bayesian_check/checkpoints
